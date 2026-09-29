@@ -15,7 +15,7 @@ for that, and a second layer here would fire exactly when the client's
 replacement had already been rejected, which is the case not to retry.
 """
 import datetime
-from typing import List
+from typing import List, Tuple
 import stamina
 # app.settings before gundi_client_v2 (see app/services/errors.py).
 from app import settings  # noqa: F401
@@ -211,3 +211,29 @@ async def send_messages_to_gundi(messages: List[dict], **kwargs) -> dict:
     assert integration_id, "integration_id is required"
     sensors_api_client = await _get_sensors_api_client(integration_id=str(integration_id))
     return await sensors_api_client.post_messages(data=messages)
+
+
+async def get_er_credentials_from_destinations(integration_id: str) -> List[Tuple[str, str]]:
+    """(base_url, token) for every destination of the integration's connection.
+
+    Each destination is expected to be an EarthRanger integration; its token is read from
+    that integration's `auth` action configuration at run time and never stored here.
+    """
+    async with GundiClient() as client:
+        async for attempt in stamina.retry_context(**GUNDI_API_RETRY):
+            with attempt:
+                connection = await client.get_connection_details(str(integration_id))
+        if not connection.destinations:
+            raise ValueError(f"No destinations configured for integration {integration_id}")
+
+        credentials = []
+        for destination in connection.destinations:
+            async for attempt in stamina.retry_context(**GUNDI_API_RETRY):
+                with attempt:
+                    details = await client.get_integration_details(str(destination.id))
+            auth_config = details.get_action_config("auth")
+            token = auth_config.data.get("token") if auth_config else None
+            if not token:
+                raise ValueError(f"No EarthRanger token in the auth settings of destination {destination.id}")
+            credentials.append((destination.base_url or details.base_url, token))
+    return credentials
