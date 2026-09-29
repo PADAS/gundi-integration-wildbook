@@ -258,3 +258,29 @@ async def test_no_photo_when_the_type_has_no_photo_field():
     wildbook = FakeWildbook({"enc-2": "https://media.example.org/abc.jpg"})
     await update(er, [(2, encounter())], wildbook=wildbook, add_photos=True)
     assert er.uploads == []
+
+
+# --- EarthRanger event types -----------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_event_types_are_read_from_every_page(mocker):
+    from app.services.earthranger import EarthRangerClient
+    client = EarthRangerClient("https://site.pamdas.org", "token")
+    pages = {
+        "https://site.pamdas.org/api/v2.0/activity/eventtypes/": {
+            "results": [{"value": "a"}], "next": "https://site.pamdas.org/api/v2.0/activity/eventtypes/?page=2"},
+        "https://site.pamdas.org/api/v2.0/activity/eventtypes/?page=2": {
+            "results": [{"value": "giraffe_nw_monitoring"}], "next": None},
+    }
+    mocker.patch.object(client, "_get", side_effect=lambda url, **params: pages[url])
+    assert await client.get_event_type_values() == ["a", "giraffe_nw_monitoring"]
+    await client._client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_event_types_as_a_plain_list(mocker):
+    from app.services.earthranger import EarthRangerClient
+    client = EarthRangerClient("https://site.pamdas.org", "token")
+    mocker.patch.object(client, "_get", return_value=[{"value": "a"}])
+    assert await client.get_event_type_values() == ["a"]
+    await client._client.aclose()

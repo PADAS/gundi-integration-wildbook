@@ -52,9 +52,18 @@ class EarthRangerClient:
         return _data(response)
 
     async def get_event_type_values(self) -> List[str]:
-        data = await self._get(f"{self.v2}/activity/eventtypes/", include_inactive="true")
-        types = data.get("results", []) if isinstance(data, dict) else data
-        return [t["value"] for t in types]
+        """Every event type on the site, following the pages when the list is paginated."""
+        values = []
+        url, params = f"{self.v2}/activity/eventtypes/", {"include_inactive": "true"}
+        while url:
+            data = await self._get(url, **params)
+            if isinstance(data, dict):
+                values += [t["value"] for t in data.get("results", [])]
+                url, params = data.get("next"), {}  # `next` already carries the query
+            else:
+                values += [t["value"] for t in data]
+                url = None
+        return values
 
     async def find_event_by_serial(self, serial: int) -> Optional[dict]:
         """The event with this number, or None. EarthRanger has no filter by number, so this
