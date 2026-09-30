@@ -9,6 +9,12 @@ from app.services.utils import FieldWithUIOptions, GlobalUISchemaOptions, UIOpti
 
 
 class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
+    wildbook_url: str = FieldWithUIOptions(
+        ...,
+        title="Wildbook Address",
+        description="The web address of your Wildbook, as you open it in the browser.",
+        ui_options=UIOptions(placeholder="e.g. https://your-wildbook.org"),
+    )
     api_token: pydantic.SecretStr = FieldWithUIOptions(
         ...,
         format="password",
@@ -17,8 +23,15 @@ class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
     )
 
     ui_global_options: GlobalUISchemaOptions = GlobalUISchemaOptions(
-        order=["api_token"],
+        order=["wildbook_url", "api_token"],
     )
+
+    @pydantic.validator("wildbook_url")
+    def check_wildbook_url(cls, v):
+        v = (v or "").strip().rstrip("/")
+        if not v.startswith(("https://", "http://")):
+            raise ValueError("Enter the full address, starting with https://")
+        return v
 
 
 class PullEventUpdatesConfig(PullActionConfiguration):

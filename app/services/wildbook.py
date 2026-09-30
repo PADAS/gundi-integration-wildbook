@@ -23,7 +23,7 @@ class WildbookClient:
 
     def __init__(self, base_url: str, token: str, timeout: float = 120.0):
         if not base_url:
-            raise ConfigurationNotFound("Enter the Wildbook address in the integration's settings.")
+            raise ConfigurationNotFound("Enter the Wildbook address in the connection settings.")
         self.api_root = f"{base_url.rstrip('/')}/api/v3"
         self._client = httpx.AsyncClient(
             headers={"Authorization": f"Bearer {token}"},

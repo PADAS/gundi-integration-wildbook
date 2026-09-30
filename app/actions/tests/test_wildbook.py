@@ -35,6 +35,13 @@ def test_wildbook_address_is_required():
         WildbookClient("", "token")
 
 
+def test_wildbook_address_setting_needs_a_full_address():
+    from app.actions.configurations import AuthenticateConfig
+    assert AuthenticateConfig(wildbook_url=" https://wb.example.org/ ", api_token="t").wildbook_url == "https://wb.example.org"
+    with pytest.raises(ValueError):
+        AuthenticateConfig(wildbook_url="wb.example.org", api_token="t")
+
+
 def test_site_name_from_destination_address():
     assert site_name("https://site-a.pamdas.org/") == "site-a"
     assert site_name("gundi-dev.staging.pamdas.org") == "gundi-dev"

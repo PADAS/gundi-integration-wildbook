@@ -64,7 +64,7 @@ class SiteReport:
 @action_title("Test Wildbook Connection")
 async def action_auth(integration, action_config: AuthenticateConfig):
     try:
-        async with WildbookClient(integration.base_url, action_config.api_token.get_secret_value()) as wildbook:
+        async with WildbookClient(action_config.wildbook_url, action_config.api_token.get_secret_value()) as wildbook:
             await wildbook.check_token()
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
@@ -86,7 +86,7 @@ async def action_pull_event_updates(integration, action_config: PullEventUpdates
     destinations = await get_er_credentials_from_destinations(integration_id)
 
     results = []
-    async with WildbookClient(integration.base_url, auth.api_token.get_secret_value()) as wildbook:
+    async with WildbookClient(auth.wildbook_url, auth.api_token.get_secret_value()) as wildbook:
         for er_url, er_token in destinations:
             results.append(await _sync_site(integration_id, wildbook, er_url, er_token, action_config, deadline))
     return {"sites": results}
