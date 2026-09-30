@@ -24,7 +24,6 @@ LIST_FIELD = "Herd"
 ID_FIELD = "giraffe_id"
 SEX_FIELD = "giraffe_sex"
 AGE_FIELD = "giraffe_age"
-PHOTO_FIELD = "giraffe_photo"
 WRITTEN_FIELDS = (ID_FIELD, SEX_FIELD, AGE_FIELD)
 
 # Every spelling of a value, in Wildbook or in an EarthRanger option, after `_normalize`

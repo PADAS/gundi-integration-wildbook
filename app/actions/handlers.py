@@ -42,7 +42,6 @@ class SiteReport:
         self.site = site
         self.encounters = 0
         self.rows_updated = 0
-        self.photos_added = 0
         self.skipped: List[dict] = []
         self.notes: List[dict] = []
         self.changes: List[dict] = []
@@ -59,7 +58,6 @@ class SiteReport:
             "site": self.site,
             "sightings_read": self.encounters,
             "rows_updated": self.rows_updated,
-            "photos_added": self.photos_added,
             "sightings_skipped": len(self.skipped),
         }
 
@@ -82,7 +80,7 @@ async def action_auth(integration, action_config: AuthenticateConfig):
 @activity_logger()
 async def action_pull_giraffe_updates(integration, action_config: PullGiraffeUpdatesConfig):
     """Update GCF's giraffe events in each EarthRanger destination with Giraffe ID, Sex and
-    Age from Wildbook, and optionally each giraffe's right-side photo. Never creates events."""
+    Age from Wildbook. Never creates events."""
     integration_id = str(integration.id)
     deadline = time.monotonic() + TIME_BUDGET_SECONDS
     auth = get_auth_config(integration)
@@ -148,8 +146,7 @@ async def _sync_site(integration_id, wildbook, er_url, er_token, config, deadlin
                 pending_versions.extend(e["version"] for _, e in items)
                 continue
             try:
-                await _update_event(er, wildbook, serial, items, names, list_fields_cache, config.add_photos, report,
-                                    copies_of)
+                await _update_event(er, serial, items, names, list_fields_cache, report, copies_of)
             except Exception as exc:
                 logger.exception(f"Could not update event #{serial} on {site}: {exc}")
                 reason = ("the event was edited in EarthRanger while updating it"
@@ -165,7 +162,7 @@ async def _sync_site(integration_id, wildbook, er_url, er_token, config, deadlin
     return report.summary()
 
 
-async def _update_event(er, wildbook, serial, items, names, list_fields_cache, add_photos, report, copies_of=None):
+async def _update_event(er, serial, items, names, list_fields_cache, report, copies_of=None):
     event = await (er.find_copied_event(copies_of, serial) if copies_of else er.find_event_by_serial(serial))
     if not event:
         for _, encounter in items:
@@ -191,7 +188,7 @@ async def _update_event(er, wildbook, serial, items, names, list_fields_cache, a
     details = {k: v for k, v in (event.get("event_details") or {}).items() if k != "updates"}
     herd = [dict(row) for row in details.get(gcf.LIST_FIELD) or []]
 
-    changed_rows, seen_rows, photo_rows, changes = set(), set(), {}, []
+    changed_rows, seen_rows, changes = set(), set(), []
     for row, encounter in items:
         if not 1 <= row <= len(herd):
             report.skip(encounter, f"event #{serial} has no row {row}")
@@ -212,22 +209,6 @@ async def _update_event(er, wildbook, serial, items, names, list_fields_cache, a
                                 "to": er_value, "encounter": encounter["id"]})
                 current[field] = er_value
                 changed_rows.add(row)
-        if add_photos and gcf.PHOTO_FIELD in fields and not current.get(gcf.PHOTO_FIELD):
-            photo_rows[encounter["id"]] = (row, encounter)
-
-    photos_added = 0
-    if photo_rows:
-        photo_urls = await wildbook.get_right_side_photos(list(photo_rows))
-        for encounter_id, url in photo_urls.items():
-            row, encounter = photo_rows[encounter_id]
-            content = await wildbook.download(url)
-            filename = f"{encounter.get('occurrenceId') or encounter_id}_{url.rsplit('/', 1)[-1]}"
-            upload_id = await er.upload_file(filename, content)
-            herd[row - 1][gcf.PHOTO_FIELD] = [{"uploadId": upload_id}]
-            changes.append({"event": serial, "row": row, "field": gcf.PHOTO_FIELD, "from": None, "to": filename,
-                            "encounter": encounter_id})
-            changed_rows.add(row)
-            photos_added += 1
 
     if not changed_rows:
         return
@@ -236,7 +217,6 @@ async def _update_event(er, wildbook, serial, items, names, list_fields_cache, a
         raise EventChangedDuringUpdate()
     await er.patch_event(event["id"], {"event_details": {**details, gcf.LIST_FIELD: herd}})
     report.rows_updated += len(changed_rows)
-    report.photos_added += photos_added
     report.changes.extend(changes)
 
 
@@ -268,8 +248,7 @@ async def _log_report(integration_id, report: SiteReport):
     await log_action_activity(
         integration_id=integration_id,
         action_id=ACTION_ID,
-        title=(f"{report.site}: {report.rows_updated} giraffe row(s) updated, {report.photos_added} photo(s) "
-               f"added, {len(report.skipped)} sighting(s) skipped"),
+        title=f"{report.site}: {report.rows_updated} giraffe row(s) updated, {len(report.skipped)} sighting(s) skipped",
         level=LogLevel.WARNING if report.skipped else LogLevel.INFO,
         data={**summary, "changes": report.changes[:MAX_LOGGED_CHANGES],
               "skipped": report.skipped[:MAX_LOGGED_SKIPS], "notes": report.notes[:MAX_LOGGED_SKIPS]},

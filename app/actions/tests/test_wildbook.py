@@ -100,7 +100,6 @@ class FakeER:
         self.edited_meanwhile = edited_meanwhile
         self.reads = 0
         self.patches = []
-        self.uploads = []
 
     async def find_event_by_serial(self, serial):
         return self.event if self.event and self.event["serial_number"] == serial else None
@@ -121,22 +120,6 @@ class FakeER:
     async def patch_event(self, event_id, body):
         self.patches.append(body)
 
-    async def upload_file(self, filename, content):
-        self.uploads.append(filename)
-        return f"upload-{len(self.uploads)}"
-
-
-class FakeWildbook:
-
-    def __init__(self, photos=None):
-        self.photos = photos or {}
-
-    async def get_right_side_photos(self, encounter_ids):
-        return {e: self.photos[e] for e in encounter_ids if e in self.photos}
-
-    async def download(self, url):
-        return b"jpeg"
-
 
 def herd_event(event_type="giraffe_survey_encounter_zmb", rows=3):
     return {
@@ -155,10 +138,9 @@ def encounter(eid="enc-2", sex="male", life_stage="adult", individual="ind-1"):
             "occurrenceId": "ZMB_SLNP_20260720105126"}
 
 
-async def update(er, items, names=None, wildbook=None, add_photos=False, copies_of=None):
+async def update(er, items, names=None, copies_of=None):
     report = handlers.SiteReport("gundi-dev")
-    await handlers._update_event(er, wildbook or FakeWildbook(), 2040, items, names or {"ind-1": "LG-0067M"},
-                                 {}, add_photos, report, copies_of)
+    await handlers._update_event(er, 2040, items, names or {"ind-1": "LG-0067M"}, {}, report, copies_of)
     return report
 
 
@@ -230,34 +212,6 @@ async def test_value_without_a_matching_option_is_left_alone_and_noted():
     report = await update(er, [(2, encounter(sex="AF"))])
     assert er.patches[0]["event_details"]["Herd"][1]["giraffe_sex"] == "u"
     assert "no giraffe_sex option" in report.notes[0]["note"]
-
-
-@pytest.mark.asyncio
-async def test_right_side_photo_goes_into_the_row():
-    er = FakeER(herd_event(), fields={**FIELDS, "giraffe_photo": None})
-    wildbook = FakeWildbook({"enc-2": "https://media.example.org/abc.jpg"})
-    report = await update(er, [(2, encounter())], wildbook=wildbook, add_photos=True)
-    assert er.patches[0]["event_details"]["Herd"][1]["giraffe_photo"] == [{"uploadId": "upload-1"}]
-    assert er.uploads == ["ZMB_SLNP_20260720105126_abc.jpg"]
-    assert report.photos_added == 1
-
-
-@pytest.mark.asyncio
-async def test_row_with_a_photo_gets_no_second_one():
-    event = herd_event()
-    event["event_details"]["Herd"][1]["giraffe_photo"] = [{"uploadId": "existing"}]
-    er = FakeER(event, fields={**FIELDS, "giraffe_photo": None})
-    wildbook = FakeWildbook({"enc-2": "https://media.example.org/abc.jpg"})
-    await update(er, [(2, encounter())], wildbook=wildbook, add_photos=True)
-    assert er.uploads == []
-
-
-@pytest.mark.asyncio
-async def test_no_photo_when_the_type_has_no_photo_field():
-    er = FakeER(herd_event())
-    wildbook = FakeWildbook({"enc-2": "https://media.example.org/abc.jpg"})
-    await update(er, [(2, encounter())], wildbook=wildbook, add_photos=True)
-    assert er.uploads == []
 
 
 # --- EarthRanger event types -----------------------------------------------------------------

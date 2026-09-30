@@ -31,15 +31,6 @@ class PullGiraffeUpdatesConfig(PullActionConfiguration):
         ),
         ui_options=UIOptions(widget="date"),
     )
-    add_photos: bool = FieldWithUIOptions(
-        True,
-        title="Add Photos",
-        description=(
-            "Add each giraffe's right-side photo from Wildbook to its row on the event, "
-            "when the event type has a photo field."
-        ),
-    )
-
     test_copies_of: Optional[str] = FieldWithUIOptions(
         None,
         title="Test Only: Copies Of Site",
@@ -51,7 +42,7 @@ class PullGiraffeUpdatesConfig(PullActionConfiguration):
     )
 
     ui_global_options: GlobalUISchemaOptions = GlobalUISchemaOptions(
-        order=["run_on_schedule", "start_from", "add_photos", "test_copies_of"],
+        order=["run_on_schedule", "start_from", "test_copies_of"],
     )
 
 

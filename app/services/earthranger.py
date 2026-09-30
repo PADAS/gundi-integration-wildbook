@@ -5,7 +5,6 @@ EarthRanger destination itself (credentials from `get_er_credentials_from_destin
 """
 import json
 import logging
-import math
 import re
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
@@ -132,21 +131,3 @@ class EarthRangerClient:
             fields[name] = {(extra.get(v) or {}).get("display", v): v for v in choices.get("enum") or []}
         return fields
 
-    async def upload_file(self, filename: str, content: bytes) -> str:
-        """Upload a file for an attachment field; returns the id to put in the field."""
-        response = await self._client.post(
-            f"{self.v1}/usercontent/chunked-uploads/", json={"filename": filename, "size": len(content)}
-        )
-        response.raise_for_status()
-        upload = _data(response)
-        chunk_size = upload["chunk_size"]
-        for n in range(math.ceil(len(content) / chunk_size)):
-            chunk = await self._client.put(
-                f"{self.v1}/usercontent/chunked-uploads/{upload['id']}/chunks/{n}/",
-                headers={"Content-Type": "application/octet-stream"},
-                content=content[n * chunk_size:(n + 1) * chunk_size],
-            )
-            chunk.raise_for_status()
-        done = await self._client.post(f"{self.v1}/usercontent/chunked-uploads/{upload['id']}/complete/")
-        done.raise_for_status()
-        return upload["id"]

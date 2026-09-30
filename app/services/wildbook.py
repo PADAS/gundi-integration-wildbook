@@ -80,32 +80,5 @@ class WildbookClient:
             names.update({h["id"]: h.get("displayName") for h in hits})
         return names
 
-    async def get_right_side_photos(self, encounter_ids: List[str]) -> Dict[str, str]:
-        """The first right-side photo URL of each encounter that has one."""
-        photos = {}
-        ids = sorted(set(encounter_ids))
-        for i in range(0, len(ids), RESOLVE_BATCH):
-            annotations = await self.search_all("annotation", {"terms": {"encounterId": ids[i:i + RESOLVE_BATCH]}})
-            annotation_ids = [a["id"] for a in annotations]
-            for j in range(0, len(annotation_ids), RESOLVE_BATCH):
-                response = await self._client.post(
-                    f"{self.api_root}/media/resolve",
-                    json={"annotationIds": annotation_ids[j:j + RESOLVE_BATCH]},
-                )
-                response.raise_for_status()
-                for media in response.json() or []:
-                    encounter_id = media.get("encounterId")
-                    if (media.get("imageUrl") and "right" in (media.get("viewpoint") or "")
-                            and encounter_id not in photos):
-                        photos[encounter_id] = media["imageUrl"]
-        return photos
-
-    async def download(self, url: str) -> bytes:
-        # Photo URLs are public; the token is not sent to the media host.
-        async with httpx.AsyncClient(timeout=self._client.timeout, follow_redirects=True) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            return response.content
-
     async def check_token(self) -> None:
         await self.search("encounter", {"match_all": {}}, size=1)
