@@ -168,11 +168,18 @@ async def test_nothing_is_written_when_the_row_already_matches():
 
 
 @pytest.mark.asyncio
-async def test_event_of_another_type_is_skipped():
-    er = FakeER(herd_event(event_type="inat_observation"))
+async def test_event_of_any_type_with_the_giraffe_fields_is_updated():
+    er = FakeER(herd_event(event_type="any_other_type"))
+    await update(er, [(2, encounter())])
+    assert er.patches[0]["event_details"]["Herd"][1]["giraffe_id"] == "LG-0067M"
+
+
+@pytest.mark.asyncio
+async def test_event_without_the_giraffe_fields_is_skipped():
+    er = FakeER(herd_event(event_type="inat_observation"), fields=None)
     report = await update(er, [(2, encounter())])
     assert er.patches == []
-    assert "not a giraffe event type" in report.skipped[0]["reason"]
+    assert "has none of the giraffe fields" in report.skipped[0]["reason"]
 
 
 @pytest.mark.asyncio
@@ -212,32 +219,6 @@ async def test_value_without_a_matching_option_is_left_alone_and_noted():
     report = await update(er, [(2, encounter(sex="AF"))])
     assert er.patches[0]["event_details"]["Herd"][1]["giraffe_sex"] == "u"
     assert "no giraffe_sex option" in report.notes[0]["note"]
-
-
-# --- EarthRanger event types -----------------------------------------------------------------
-
-@pytest.mark.asyncio
-async def test_event_types_are_read_from_every_page(mocker):
-    from app.services.earthranger import EarthRangerClient
-    client = EarthRangerClient("https://site.pamdas.org", "token")
-    pages = {
-        "https://site.pamdas.org/api/v2.0/activity/eventtypes/": {
-            "results": [{"value": "a"}], "next": "https://site.pamdas.org/api/v2.0/activity/eventtypes/?page=2"},
-        "https://site.pamdas.org/api/v2.0/activity/eventtypes/?page=2": {
-            "results": [{"value": "giraffe_nw_monitoring"}], "next": None},
-    }
-    mocker.patch.object(client, "_get", side_effect=lambda url, **params: pages[url])
-    assert await client.get_event_type_values() == ["a", "giraffe_nw_monitoring"]
-    await client._client.aclose()
-
-
-@pytest.mark.asyncio
-async def test_event_types_as_a_plain_list(mocker):
-    from app.services.earthranger import EarthRangerClient
-    client = EarthRangerClient("https://site.pamdas.org", "token")
-    mocker.patch.object(client, "_get", return_value=[{"value": "a"}])
-    assert await client.get_event_type_values() == ["a"]
-    await client._client.aclose()
 
 
 # --- Activity Log ------------------------------------------------------------------------

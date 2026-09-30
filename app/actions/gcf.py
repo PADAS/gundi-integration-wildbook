@@ -1,24 +1,11 @@
-"""GCF's giraffe event types and how Wildbook values map onto their rows.
+"""How Wildbook values map onto the giraffe rows of GCF's events.
 
-This first version works with GCF's event types only. Each giraffe is one row of the
-event's `Herd` list; Wildbook stamps the row in the encounter's remarks as
-`er=<site>:<event number>:<row>`, written by GCF's ER2WB tool.
+This first version works with GCF's field names. Any event type whose `Herd` list has
+them is updated. Each giraffe is one row of that list, and Wildbook stamps the row in the
+encounter's remarks as `er=<site>:<event number>:<row>`, written by GCF's ER2WB tool.
 """
 import re
 from typing import Dict, Optional, Tuple
-
-GIRAFFE_EVENT_TYPES = (
-    "giraffe_survey_encounter_ken",
-    "giraffe_survey_encounter_tza",
-    "giraffe_survey_encounter_zmb",
-    "giraffe_survey_encounter_bwa",
-    "giraffe_survey_encounter_nam",
-    "giraffe_survey_kaza",
-    "giraffe_random_encounter_zmb",
-    "giraffe_random_encounter_nam",
-    "giraffe_random_kaza",
-    "giraffe_nw_monitoring",
-)
 
 LIST_FIELD = "Herd"
 ID_FIELD = "giraffe_id"

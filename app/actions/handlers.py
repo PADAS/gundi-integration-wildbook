@@ -27,7 +27,6 @@ ACTION_ID = "pull_giraffe_updates"
 INDEXING_LAG = timedelta(minutes=5)
 # Leave time to save progress before the runner's own limit ends the run.
 TIME_BUDGET_SECONDS = max(settings.MAX_ACTION_EXECUTION_TIME - 90, 60)
-MISSING_EVENT_TYPE_WARNING_INTERVAL = timedelta(hours=1)
 MAX_LOGGED_SKIPS = 100
 MAX_LOGGED_CHANGES = 300
 
@@ -115,14 +114,6 @@ async def _sync_site(integration_id, wildbook, er_url, er_token, config, deadlin
         return report.summary()
 
     async with EarthRangerClient(er_url, er_token) as er:
-        types_on_site = set(await er.get_event_type_values())
-        missing = [t for t in gcf.GIRAFFE_EVENT_TYPES if t not in types_on_site]
-        if missing:
-            state = await _warn_missing_types(integration_id, er_url, state, missing, now)
-        if len(missing) == len(gcf.GIRAFFE_EVENT_TYPES):
-            await _save_state(integration_id, er_url, state)
-            return report.summary()
-
         encounters = await wildbook.get_encounters_changed(since_ms, until_ms, f"*er={site}:*")
         report.encounters = len(encounters)
         by_event = defaultdict(list)
@@ -170,10 +161,6 @@ async def _update_event(er, serial, items, names, list_fields_cache, report, cop
                         + " not found")
         return
     event_type = event.get("event_type")
-    if event_type not in gcf.GIRAFFE_EVENT_TYPES:
-        for _, encounter in items:
-            report.skip(encounter, f"event #{serial} is a '{event_type}' event, not a giraffe event type")
-        return
     if event_type not in list_fields_cache:
         list_fields_cache[event_type] = await er.get_list_fields(event_type, gcf.LIST_FIELD)
     fields = list_fields_cache[event_type]
@@ -218,20 +205,6 @@ async def _update_event(er, serial, items, names, list_fields_cache, report, cop
     await er.patch_event(event["id"], {"event_details": {**details, gcf.LIST_FIELD: herd}})
     report.rows_updated += len(changed_rows)
     report.changes.extend(changes)
-
-
-async def _warn_missing_types(integration_id, er_url, state, missing, now) -> dict:
-    last_warned = state.get("last_missing_types_warning")
-    if last_warned and now - datetime.fromisoformat(last_warned) < MISSING_EVENT_TYPE_WARNING_INTERVAL:
-        return state
-    await log_action_activity(
-        integration_id=integration_id,
-        action_id=ACTION_ID,
-        title=f"Giraffe event types not found on {er_url}, skipped: {', '.join(missing)}",
-        level=LogLevel.WARNING,
-        data={"er_site": er_url, "missing_event_types": missing},
-    )
-    return {**state, "last_missing_types_warning": now.isoformat()}
 
 
 async def _log_report(integration_id, report: SiteReport):
