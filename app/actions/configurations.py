@@ -25,22 +25,38 @@ class PullEventUpdatesConfig(PullActionConfiguration):
     list_field: str = FieldWithUIOptions(
         ...,
         title="List Field",
-        description="The list on the EarthRanger event that holds one row per animal, as named in the event type.",
+        description=(
+            "The EarthRanger field ID of the list on the event that holds one row per animal, "
+            "as written in the event type's schema (not its display name)."
+        ),
+        ui_options=UIOptions(placeholder="e.g. Animals"),
     )
     id_field: Optional[str] = FieldWithUIOptions(
         None,
         title="ID Field",
-        description="The field in each row that takes the animal's Wildbook name. Leave empty to not update it.",
+        description=(
+            "The EarthRanger field ID, inside that list, that takes the animal's Wildbook name. "
+            "Leave empty to not update it."
+        ),
+        ui_options=UIOptions(placeholder="e.g. animal_id"),
     )
     sex_field: Optional[str] = FieldWithUIOptions(
         None,
         title="Sex Field",
-        description="The field in each row that takes the animal's sex. Leave empty to not update it.",
+        description=(
+            "The EarthRanger field ID, inside that list, that takes the animal's sex from Wildbook. "
+            "Leave empty to not update it."
+        ),
+        ui_options=UIOptions(placeholder="e.g. animal_sex"),
     )
     age_field: Optional[str] = FieldWithUIOptions(
         None,
         title="Age Field",
-        description="The field in each row that takes the animal's life stage. Leave empty to not update it.",
+        description=(
+            "The EarthRanger field ID, inside that list, that takes the animal's life stage from Wildbook. "
+            "Leave empty to not update it."
+        ),
+        ui_options=UIOptions(placeholder="e.g. animal_age"),
     )
     start_from: Optional[date] = FieldWithUIOptions(
         None,
@@ -56,9 +72,10 @@ class PullEventUpdatesConfig(PullActionConfiguration):
         title="Test Only: Copies Of Site",
         description=(
             "Leave empty. On a test site holding copies of another site's events, enter that "
-            "site's name (for example twiga): Wildbook sightings for that site then update the "
+            "site's name: Wildbook sightings for that site then update the "
             "copies here, found by the \"Copied from ... event #...\" note on each copy."
         ),
+        ui_options=UIOptions(placeholder="e.g. mysite"),
     )
 
     ui_global_options: GlobalUISchemaOptions = GlobalUISchemaOptions(

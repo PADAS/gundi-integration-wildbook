@@ -74,7 +74,7 @@ async def action_auth(integration, action_config: AuthenticateConfig):
     return {"valid_credentials": True}
 
 
-@action_title("Update Events")
+@action_title("Update EarthRanger Events")
 @crontab_schedule("*/20 * * * *")
 @activity_logger()
 async def action_pull_event_updates(integration, action_config: PullEventUpdatesConfig):
