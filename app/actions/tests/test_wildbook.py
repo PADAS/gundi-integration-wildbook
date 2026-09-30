@@ -284,3 +284,13 @@ async def test_event_types_as_a_plain_list(mocker):
     mocker.patch.object(client, "_get", return_value=[{"value": "a"}])
     assert await client.get_event_type_values() == ["a"]
     await client._client.aclose()
+
+
+# --- Activity Log ------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_a_run_with_nothing_to_update_logs_an_info_entry(mocker):
+    log = mocker.patch.object(handlers, "log_action_activity")
+    await handlers._log_report("integration-1", handlers.SiteReport("twiga"))
+    assert log.call_args.kwargs["title"] == "twiga: no new Wildbook sightings for this site, nothing to update"
+    assert log.call_args.kwargs["level"] == handlers.LogLevel.INFO

@@ -111,6 +111,7 @@ async def _sync_site(integration_id, wildbook, er_url, er_token, config, deadlin
     else:
         # First run with no start date: start from now.
         await _save_state(integration_id, er_url, {**state, "since_ms": until_ms})
+        await _log_report(integration_id, report)
         return report.summary()
     if since_ms >= until_ms:
         return report.summary()
@@ -160,8 +161,7 @@ async def _sync_site(integration_id, wildbook, er_url, er_token, config, deadlin
     # Everything changed up to the new starting point is done.
     new_since = min(pending_versions) - 1 if pending_versions else until_ms
     await _save_state(integration_id, er_url, {**state, "since_ms": max(new_since, since_ms)})
-    if report.encounters:
-        await _log_report(integration_id, report)
+    await _log_report(integration_id, report)
     return report.summary()
 
 
@@ -256,6 +256,15 @@ async def _warn_missing_types(integration_id, er_url, state, missing, now) -> di
 
 async def _log_report(integration_id, report: SiteReport):
     summary = report.summary()
+    if not report.encounters:
+        await log_action_activity(
+            integration_id=integration_id,
+            action_id=ACTION_ID,
+            title=f"{report.site}: no new Wildbook sightings for this site, nothing to update",
+            level=LogLevel.INFO,
+            data=summary,
+        )
+        return
     await log_action_activity(
         integration_id=integration_id,
         action_id=ACTION_ID,
