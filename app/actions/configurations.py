@@ -21,7 +21,27 @@ class AuthenticateConfig(AuthActionConfiguration, ExecutableActionMixin):
     )
 
 
-class PullGiraffeUpdatesConfig(PullActionConfiguration):
+class PullEventUpdatesConfig(PullActionConfiguration):
+    list_field: str = FieldWithUIOptions(
+        ...,
+        title="List Field",
+        description="The list on the EarthRanger event that holds one row per animal, as named in the event type.",
+    )
+    id_field: Optional[str] = FieldWithUIOptions(
+        None,
+        title="ID Field",
+        description="The field in each row that takes the animal's Wildbook name. Leave empty to not update it.",
+    )
+    sex_field: Optional[str] = FieldWithUIOptions(
+        None,
+        title="Sex Field",
+        description="The field in each row that takes the animal's sex. Leave empty to not update it.",
+    )
+    age_field: Optional[str] = FieldWithUIOptions(
+        None,
+        title="Age Field",
+        description="The field in each row that takes the animal's life stage. Leave empty to not update it.",
+    )
     start_from: Optional[date] = FieldWithUIOptions(
         None,
         title="Start From",
@@ -42,8 +62,20 @@ class PullGiraffeUpdatesConfig(PullActionConfiguration):
     )
 
     ui_global_options: GlobalUISchemaOptions = GlobalUISchemaOptions(
-        order=["run_on_schedule", "start_from", "test_copies_of"],
+        order=["run_on_schedule", "list_field", "id_field", "sex_field", "age_field", "start_from", "test_copies_of"],
     )
+
+    @pydantic.validator("list_field", "id_field", "sex_field", "age_field", pre=True)
+    def strip_field_names(cls, v):
+        return v.strip() or None if isinstance(v, str) else v
+
+    @pydantic.root_validator(skip_on_failure=True)
+    def check_some_field(cls, values):
+        if not values.get("list_field"):
+            raise ValueError("Enter the list field.")
+        if not any(values.get(f) for f in ("id_field", "sex_field", "age_field")):
+            raise ValueError("Enter at least one of the ID, sex or age fields.")
+        return values
 
 
 def get_auth_config(integration) -> AuthenticateConfig:

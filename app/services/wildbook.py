@@ -10,9 +10,10 @@ from typing import Dict, List, Tuple
 
 import httpx
 
+from app.services.errors import ConfigurationNotFound
+
 logger = logging.getLogger(__name__)
 
-DEFAULT_BASE_URL = "https://giraffespotter.org"
 MAX_RESULT_WINDOW = 10_000
 PAGE_SIZE = 500
 RESOLVE_BATCH = 100
@@ -21,7 +22,9 @@ RESOLVE_BATCH = 100
 class WildbookClient:
 
     def __init__(self, base_url: str, token: str, timeout: float = 120.0):
-        self.api_root = f"{(base_url or DEFAULT_BASE_URL).rstrip('/')}/api/v3"
+        if not base_url:
+            raise ConfigurationNotFound("Enter the Wildbook address in the integration's settings.")
+        self.api_root = f"{base_url.rstrip('/')}/api/v3"
         self._client = httpx.AsyncClient(
             headers={"Authorization": f"Bearer {token}"},
             timeout=timeout,

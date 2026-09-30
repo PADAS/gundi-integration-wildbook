@@ -14,14 +14,14 @@ from app.services.earthranger import EarthRangerClient, site_name
 from app.services.gundi import get_er_credentials_from_destinations
 from app.services.state import IntegrationStateManager
 from app.services.wildbook import WildbookClient
-from .configurations import AuthenticateConfig, PullGiraffeUpdatesConfig, get_auth_config
+from .configurations import AuthenticateConfig, PullEventUpdatesConfig, get_auth_config
 from .core import action_title
-from . import gcf
+from . import mapping
 
 logger = logging.getLogger(__name__)
 state_manager = IntegrationStateManager()
 
-ACTION_ID = "pull_giraffe_updates"
+ACTION_ID = "pull_event_updates"
 # Wildbook changes can take a moment to reach its search index, so each run stops
 # this far before now; the next run picks them up.
 INDEXING_LAG = timedelta(minutes=5)
@@ -74,12 +74,12 @@ async def action_auth(integration, action_config: AuthenticateConfig):
     return {"valid_credentials": True}
 
 
-@action_title("Update Giraffe Events")
+@action_title("Update Events")
 @crontab_schedule("*/20 * * * *")
 @activity_logger()
-async def action_pull_giraffe_updates(integration, action_config: PullGiraffeUpdatesConfig):
-    """Update GCF's giraffe events in each EarthRanger destination with Giraffe ID, Sex and
-    Age from Wildbook. Never creates events."""
+async def action_pull_event_updates(integration, action_config: PullEventUpdatesConfig):
+    """Update the animal rows of existing events in each EarthRanger destination with the ID,
+    sex and age Wildbook has for each animal. Never creates events."""
     integration_id = str(integration.id)
     deadline = time.monotonic() + TIME_BUDGET_SECONDS
     auth = get_auth_config(integration)
@@ -118,13 +118,13 @@ async def _sync_site(integration_id, wildbook, er_url, er_token, config, deadlin
         report.encounters = len(encounters)
         by_event = defaultdict(list)
         for encounter in encounters:
-            stamp = gcf.parse_stamp(encounter.get("occurrenceRemarks"))
+            stamp = mapping.parse_stamp(encounter.get("occurrenceRemarks"))
             if not stamp:
                 report.skip(encounter, "the stamp can't be read")
             elif stamp[0] != site:
                 report.skip(encounter, f"the stamp is for another site ({stamp[0]})")
             elif not encounter.get("individualId"):
-                report.skip(encounter, "the giraffe isn't identified in Wildbook yet")
+                report.skip(encounter, "the animal isn't identified in Wildbook yet")
             else:
                 by_event[stamp[1]].append((stamp[2], encounter))
 
@@ -137,7 +137,7 @@ async def _sync_site(integration_id, wildbook, er_url, er_token, config, deadlin
                 pending_versions.extend(e["version"] for _, e in items)
                 continue
             try:
-                await _update_event(er, serial, items, names, list_fields_cache, report, copies_of)
+                await _update_event(er, serial, items, names, list_fields_cache, report, config, copies_of)
             except Exception as exc:
                 logger.exception(f"Could not update event #{serial} on {site}: {exc}")
                 reason = ("the event was edited in EarthRanger while updating it"
@@ -153,7 +153,7 @@ async def _sync_site(integration_id, wildbook, er_url, er_token, config, deadlin
     return report.summary()
 
 
-async def _update_event(er, serial, items, names, list_fields_cache, report, copies_of=None):
+async def _update_event(er, serial, items, names, list_fields_cache, report, config, copies_of=None):
     event = await (er.find_copied_event(copies_of, serial) if copies_of else er.find_event_by_serial(serial))
     if not event:
         for _, encounter in items:
@@ -162,31 +162,33 @@ async def _update_event(er, serial, items, names, list_fields_cache, report, cop
         return
     event_type = event.get("event_type")
     if event_type not in list_fields_cache:
-        list_fields_cache[event_type] = await er.get_list_fields(event_type, gcf.LIST_FIELD)
+        list_fields_cache[event_type] = await er.get_list_fields(event_type, config.list_field)
     fields = list_fields_cache[event_type]
-    if not fields or not any(f in fields for f in gcf.WRITTEN_FIELDS):
+    written = [f for f in (config.id_field, config.sex_field, config.age_field) if f]
+    if not fields or not any(f in fields for f in written):
         for _, encounter in items:
-            report.skip(encounter, f"event type '{event_type}' has none of the giraffe fields "
-                                   f"({', '.join(gcf.WRITTEN_FIELDS)}) in its {gcf.LIST_FIELD} list")
+            report.skip(encounter, f"event type '{event_type}' has none of the fields "
+                                   f"({', '.join(written)}) in a '{config.list_field}' list")
         return
 
     event = await er.get_event(event["id"])
     read_at = event.get("updated_at")
     details = {k: v for k, v in (event.get("event_details") or {}).items() if k != "updates"}
-    herd = [dict(row) for row in details.get(gcf.LIST_FIELD) or []]
+    rows = [dict(row) for row in details.get(config.list_field) or []]
 
     changed_rows, seen_rows, changes = set(), set(), []
     for row, encounter in items:
-        if not 1 <= row <= len(herd):
+        if not 1 <= row <= len(rows):
             report.skip(encounter, f"event #{serial} has no row {row}")
             continue
         if row in seen_rows:
             report.skip(encounter, f"another sighting is stamped for event #{serial} row {row}")
             continue
         seen_rows.add(row)
-        current = herd[row - 1]
-        for field, (wildbook_value, er_value) in gcf.row_values(
-                encounter, names.get(encounter["individualId"]), fields).items():
+        current = rows[row - 1]
+        for field, (wildbook_value, er_value) in mapping.row_values(
+                encounter, names.get(encounter["individualId"]), fields,
+                config.id_field, config.sex_field, config.age_field).items():
             if er_value is None:
                 if wildbook_value:
                     report.note(encounter, f"no {field} option for Wildbook value '{wildbook_value}', left as is")
@@ -202,7 +204,7 @@ async def _update_event(er, serial, items, names, list_fields_cache, report, cop
     latest = await er.get_event(event["id"])
     if latest.get("updated_at") != read_at:
         raise EventChangedDuringUpdate()
-    await er.patch_event(event["id"], {"event_details": {**details, gcf.LIST_FIELD: herd}})
+    await er.patch_event(event["id"], {"event_details": {**details, config.list_field: rows}})
     report.rows_updated += len(changed_rows)
     report.changes.extend(changes)
 
@@ -221,7 +223,7 @@ async def _log_report(integration_id, report: SiteReport):
     await log_action_activity(
         integration_id=integration_id,
         action_id=ACTION_ID,
-        title=f"{report.site}: {report.rows_updated} giraffe row(s) updated, {len(report.skipped)} sighting(s) skipped",
+        title=f"{report.site}: {report.rows_updated} row(s) updated, {len(report.skipped)} sighting(s) skipped",
         level=LogLevel.WARNING if report.skipped else LogLevel.INFO,
         data={**summary, "changes": report.changes[:MAX_LOGGED_CHANGES],
               "skipped": report.skipped[:MAX_LOGGED_SKIPS], "notes": report.notes[:MAX_LOGGED_SKIPS]},
