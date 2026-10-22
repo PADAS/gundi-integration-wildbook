@@ -6,7 +6,7 @@ Search endpoints take OpenSearch queries and page with `from`/`size`, where
 query into smaller windows (see `search_all`).
 """
 import logging
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import httpx
 
@@ -82,6 +82,35 @@ class WildbookClient:
             hits = await self.search_all("individual", {"terms": {"id": ids[i:i + RESOLVE_BATCH]}})
             names.update({h["id"]: h.get("displayName") for h in hits})
         return names
+
+    async def get_photos(self, encounter_ids: List[str], viewpoint: Optional[str] = None) -> Dict[str, str]:
+        """The first photo URL of each encounter that has one, optionally only photos whose
+        viewpoint contains `viewpoint` (for example "right")."""
+        photos = {}
+        ids = sorted(set(encounter_ids))
+        wanted = (viewpoint or "").strip().lower()
+        for i in range(0, len(ids), RESOLVE_BATCH):
+            annotations = await self.search_all("annotation", {"terms": {"encounterId": ids[i:i + RESOLVE_BATCH]}})
+            annotation_ids = [a["id"] for a in annotations]
+            for j in range(0, len(annotation_ids), RESOLVE_BATCH):
+                response = await self._client.post(
+                    f"{self.api_root}/media/resolve",
+                    json={"annotationIds": annotation_ids[j:j + RESOLVE_BATCH]},
+                )
+                response.raise_for_status()
+                for media in response.json() or []:
+                    encounter_id = media.get("encounterId")
+                    if (media.get("imageUrl") and encounter_id not in photos
+                            and wanted in (media.get("viewpoint") or "").lower()):
+                        photos[encounter_id] = media["imageUrl"]
+        return photos
+
+    async def download(self, url: str) -> bytes:
+        # Photo URLs are public; the token is not sent to the media host.
+        async with httpx.AsyncClient(timeout=self._client.timeout, follow_redirects=True) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.content
 
     async def check_token(self) -> None:
         await self.search("encounter", {"match_all": {}}, size=1)

@@ -41,6 +41,7 @@ class SiteReport:
         self.site = site
         self.encounters = 0
         self.rows_updated = 0
+        self.photos_added = 0
         self.skipped: List[dict] = []
         self.notes: List[dict] = []
         self.changes: List[dict] = []
@@ -57,6 +58,7 @@ class SiteReport:
             "site": self.site,
             "sightings_read": self.encounters,
             "rows_updated": self.rows_updated,
+            "photos_added": self.photos_added,
             "sightings_skipped": len(self.skipped),
         }
 
@@ -117,7 +119,7 @@ async def _sync_site(integration_id, wildbook, er_url, er_token, config, deadlin
         encounters = await wildbook.get_encounters_changed(since_ms, until_ms, f"*er={site}:*")
         report.encounters = len(encounters)
         by_event = defaultdict(list)
-        for encounter in encounters:
+        for encounter in _without_extra_detections(encounters):
             stamp = mapping.parse_stamp(encounter.get("occurrenceRemarks"))
             if not stamp:
                 report.skip(encounter, "the stamp can't be read")
@@ -137,7 +139,7 @@ async def _sync_site(integration_id, wildbook, er_url, er_token, config, deadlin
                 pending_versions.extend(e["version"] for _, e in items)
                 continue
             try:
-                await _update_event(er, serial, items, names, list_fields_cache, report, config, copies_of)
+                await _update_event(er, wildbook, serial, items, names, list_fields_cache, report, config, copies_of)
             except Exception as exc:
                 logger.exception(f"Could not update event #{serial} on {site}: {exc}")
                 reason = ("the event was edited in EarthRanger while updating it"
@@ -153,7 +155,17 @@ async def _sync_site(integration_id, wildbook, er_url, er_token, config, deadlin
     return report.summary()
 
 
-async def _update_event(er, serial, items, names, list_fields_cache, report, config, copies_of=None):
+def _without_extra_detections(encounters: List[dict]) -> List[dict]:
+    """Leave out encounters with no sex and no life stage that share their stamp with another
+    encounter: Wildbook creates those for another animal it finds in the background of a photo."""
+    stamps = defaultdict(int)
+    for encounter in encounters:
+        stamps[mapping.parse_stamp(encounter.get("occurrenceRemarks"))] += 1
+    return [e for e in encounters
+            if stamps[mapping.parse_stamp(e.get("occurrenceRemarks"))] < 2 or e.get("sex") or e.get("lifeStage")]
+
+
+async def _update_event(er, wildbook, serial, items, names, list_fields_cache, report, config, copies_of=None):
     event = await (er.find_copied_event(copies_of, serial) if copies_of else er.find_event_by_serial(serial))
     if not event:
         for _, encounter in items:
@@ -164,7 +176,7 @@ async def _update_event(er, serial, items, names, list_fields_cache, report, con
     if event_type not in list_fields_cache:
         list_fields_cache[event_type] = await er.get_list_fields(event_type, config.list_field)
     fields = list_fields_cache[event_type]
-    written = [f for f in (config.id_field, config.sex_field, config.age_field) if f]
+    written = [f for f in (config.id_field, config.sex_field, config.age_field, config.notes_field, config.photo_field) if f]
     if not fields or not any(f in fields for f in written):
         for _, encounter in items:
             report.skip(encounter, f"event type '{event_type}' has none of the fields "
@@ -176,7 +188,7 @@ async def _update_event(er, serial, items, names, list_fields_cache, report, con
     details = {k: v for k, v in (event.get("event_details") or {}).items() if k != "updates"}
     rows = [dict(row) for row in details.get(config.list_field) or []]
 
-    changed_rows, seen_rows, changes = set(), set(), []
+    changed_rows, seen_rows, photo_rows, changes = set(), set(), {}, []
     for row, encounter in items:
         if not 1 <= row <= len(rows):
             report.skip(encounter, f"event #{serial} has no row {row}")
@@ -188,7 +200,7 @@ async def _update_event(er, serial, items, names, list_fields_cache, report, con
         current = rows[row - 1]
         for field, (wildbook_value, er_value) in mapping.row_values(
                 encounter, names.get(encounter["individualId"]), fields,
-                config.id_field, config.sex_field, config.age_field).items():
+                config.id_field, config.sex_field, config.age_field, config.notes_field, current).items():
             if er_value is None:
                 if wildbook_value:
                     report.note(encounter, f"no {field} option for Wildbook value '{wildbook_value}', left as is")
@@ -198,6 +210,22 @@ async def _update_event(er, serial, items, names, list_fields_cache, report, con
                                 "to": er_value, "encounter": encounter["id"]})
                 current[field] = er_value
                 changed_rows.add(row)
+        if config.photo_field and config.photo_field in fields and not current.get(config.photo_field):
+            photo_rows[encounter["id"]] = (row, encounter)
+
+    photos_added = 0
+    if photo_rows:
+        photo_urls = await wildbook.get_photos(list(photo_rows), config.photo_viewpoint)
+        for encounter_id, url in photo_urls.items():
+            row, encounter = photo_rows[encounter_id]
+            content = await wildbook.download(url)
+            filename = f"{encounter.get('occurrenceId') or encounter_id}_{url.rsplit('/', 1)[-1]}"
+            upload_id = await er.upload_file(filename, content)
+            rows[row - 1][config.photo_field] = [{"uploadId": upload_id}]
+            changes.append({"event": serial, "row": row, "field": config.photo_field, "from": None, "to": filename,
+                            "encounter": encounter_id})
+            changed_rows.add(row)
+            photos_added += 1
 
     if not changed_rows:
         return
@@ -206,6 +234,7 @@ async def _update_event(er, serial, items, names, list_fields_cache, report, con
         raise EventChangedDuringUpdate()
     await er.patch_event(event["id"], {"event_details": {**details, config.list_field: rows}})
     report.rows_updated += len(changed_rows)
+    report.photos_added += photos_added
     report.changes.extend(changes)
 
 
@@ -223,7 +252,8 @@ async def _log_report(integration_id, report: SiteReport):
     await log_action_activity(
         integration_id=integration_id,
         action_id=ACTION_ID,
-        title=f"{report.site}: {report.rows_updated} row(s) updated, {len(report.skipped)} sighting(s) skipped",
+        title=(f"{report.site}: {report.rows_updated} row(s) updated, {report.photos_added} photo(s) added, "
+               f"{len(report.skipped)} sighting(s) skipped"),
         level=LogLevel.WARNING if report.skipped else LogLevel.INFO,
         data={**summary, "changes": report.changes[:MAX_LOGGED_CHANGES],
               "skipped": report.skipped[:MAX_LOGGED_SKIPS], "notes": report.notes[:MAX_LOGGED_SKIPS]},

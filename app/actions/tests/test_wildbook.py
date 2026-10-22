@@ -78,9 +78,38 @@ def test_age_spellings(life_stage, expected):
     assert mapping.row_values({"lifeStage": life_stage}, None, FIELDS, *FIELD_NAMES)["animal_age"][1] == expected
 
 
-def test_age_left_alone_when_the_type_has_no_such_option():
-    other_age = {"adult": "ad", "subadult": "sa", "calf": "ca", "unknown": "u"}
-    assert mapping.row_values({"lifeStage": "juvenile"}, None, {**FIELDS, "animal_age": other_age}, *FIELD_NAMES)["animal_age"][1] is None
+def test_juvenile_takes_subadult_when_the_type_has_no_juvenile_option():
+    no_juvenile = {"adult": "ad", "subadult": "sa", "calf": "ca", "unknown": "u"}
+    assert mapping.row_values({"lifeStage": "juvenile"}, None, {**FIELDS, "animal_age": no_juvenile}, *FIELD_NAMES)["animal_age"][1] == "sa"
+
+
+def test_age_left_alone_when_no_option_fits():
+    only_adult = {"adult": "ad"}
+    assert mapping.row_values({"lifeStage": "calf"}, None, {**FIELDS, "animal_age": only_adult}, *FIELD_NAMES)["animal_age"][1] is None
+
+
+@pytest.mark.parametrize("remarks, expected", [
+    ("gsd_no|snare_no|er=site-a:2040:2", "gsd_no|snare_no"),
+    ("UNIDENTIFIED; er=site-a:50325:3", "UNIDENTIFIED"),
+    ("reprojected from lon=31.9, lat=-12.9 (bearing=314° from EXIF, distance=186m); er=site-a:1:4", ""),
+    ("Tagged; reprojected from lon=1, lat=2 (bearing=90°, distance=155m); er=site-a:1:1", "Tagged"),
+    ("Male with lumps on face; er=site-a:51584:1", "Male with lumps on face"),
+])
+def test_notes_leave_out_the_label_and_the_upload_location_note(remarks, expected):
+    assert mapping.remarks_without_stamp(remarks) == expected
+
+
+def test_notes_are_added_after_the_team_notes_once():
+    assert mapping.appended_notes("Torn ear", "Limping; er=site-a:1:1", None) == "Torn ear; Limping"
+    assert mapping.appended_notes("Torn ear; Limping", "Limping; er=site-a:1:1", None) == "Torn ear; Limping"
+    assert mapping.appended_notes("Torn ear", "er=site-a:1:1", None) is None
+
+
+def test_background_detections_sharing_a_label_are_ignored():
+    found = [{"id": "a", "occurrenceRemarks": "er=site-a:1:1", "sex": "male"},
+             {"id": "b", "occurrenceRemarks": "er=site-a:1:1"},
+             {"id": "c", "occurrenceRemarks": "er=site-a:2:1"}]
+    assert [e["id"] for e in handlers._without_extra_detections(found)] == ["a", "c"]
 
 
 def test_only_fields_the_type_has_are_written():
@@ -127,6 +156,7 @@ class FakeER:
         self.edited_meanwhile = edited_meanwhile
         self.reads = 0
         self.patches = []
+        self.uploads = []
 
     async def find_event_by_serial(self, serial):
         return self.event if self.event and self.event["serial_number"] == serial else None
@@ -147,6 +177,24 @@ class FakeER:
     async def patch_event(self, event_id, body):
         self.patches.append(body)
 
+    async def upload_file(self, filename, content):
+        self.uploads.append(filename)
+        return f"upload-{len(self.uploads)}"
+
+
+class FakeWildbook:
+
+    def __init__(self, photos=None):
+        self.photos = photos or {}
+        self.viewpoints = []
+
+    async def get_photos(self, encounter_ids, viewpoint=None):
+        self.viewpoints.append(viewpoint)
+        return {e: self.photos[e] for e in encounter_ids if e in self.photos}
+
+    async def download(self, url):
+        return b"jpeg"
+
 
 def list_event(event_type="animal_survey", rows=3):
     return {
@@ -165,10 +213,44 @@ def encounter(eid="enc-2", sex="male", life_stage="adult", individual="ind-1"):
             "occurrenceId": "SITE_20260720105126"}
 
 
-async def update(er, items, names=None, copies_of=None):
+async def update(er, items, names=None, copies_of=None, wildbook=None, config=CONFIG):
     report = handlers.SiteReport("gundi-dev")
-    await handlers._update_event(er, 2040, items, names or {"ind-1": "LG-0067M"}, {}, report, CONFIG, copies_of)
+    await handlers._update_event(er, wildbook or FakeWildbook(), 2040, items, names or {"ind-1": "LG-0067M"}, {},
+                                 report, config, copies_of)
     return report
+
+
+PHOTO_CONFIG = PullEventUpdatesConfig(list_field="Animals", id_field="animal_id", photo_field="animal_photo",
+                                      photo_viewpoint="right")
+
+
+@pytest.mark.asyncio
+async def test_photo_goes_into_the_row():
+    er = FakeER(list_event(), fields={**FIELDS, "animal_photo": None})
+    wildbook = FakeWildbook({"enc-2": "https://media.example.org/abc.jpg"})
+    report = await update(er, [(2, encounter())], wildbook=wildbook, config=PHOTO_CONFIG)
+    assert er.patches[0]["event_details"]["Animals"][1]["animal_photo"] == [{"uploadId": "upload-1"}]
+    assert er.uploads == ["SITE_20260720105126_abc.jpg"]
+    assert wildbook.viewpoints == ["right"]
+    assert report.photos_added == 1
+
+
+@pytest.mark.asyncio
+async def test_row_with_a_photo_gets_no_second_one():
+    event = list_event()
+    event["event_details"]["Animals"][1]["animal_photo"] = [{"uploadId": "existing"}]
+    er = FakeER(event, fields={**FIELDS, "animal_photo": None})
+    await update(er, [(2, encounter())], wildbook=FakeWildbook({"enc-2": "https://m.example.org/a.jpg"}),
+                 config=PHOTO_CONFIG)
+    assert er.uploads == []
+
+
+@pytest.mark.asyncio
+async def test_no_photo_when_the_type_has_no_photo_field():
+    er = FakeER(list_event())
+    await update(er, [(2, encounter())], wildbook=FakeWildbook({"enc-2": "https://m.example.org/a.jpg"}),
+                 config=PHOTO_CONFIG)
+    assert er.uploads == []
 
 
 @pytest.mark.asyncio

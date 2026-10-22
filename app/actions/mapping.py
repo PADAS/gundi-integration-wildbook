@@ -22,7 +22,8 @@ AGE_WORDS = {
     "unknown": {"unknown", "u"},
 }
 
-STAMP_RE = re.compile(r"(?:^|\|)er=([a-z0-9-]+):(\d+):(\d+)(?:\||$)")
+# The tag may follow other remarks, separated by "|" or ";" (e.g. "UNIDENTIFIED; er=twiga:50325:3").
+STAMP_RE = re.compile(r"(?:^|[|;])\s*er=([a-z0-9-]+):(\d+):(\d+)\s*(?:[|;]|$)")
 
 
 def parse_stamp(remarks: Optional[str]) -> Optional[Tuple[str, int, int]]:
@@ -57,8 +58,44 @@ def individual_id_value(name: Optional[str], options: Optional[dict]):
     return hits[0] if len(hits) == 1 else None
 
 
+def age_value(life_stage: Optional[str], options: Optional[dict]):
+    """The option for a Wildbook life stage. A form with no Juvenile choice takes Subadult:
+    the upload to Wildbook turns Subadult into `juvenile` (Twiga's NW monitoring form)."""
+    value = _pick_option(life_stage, AGE_WORDS, options)
+    if value is None and life_stage and _normalize(life_stage) in AGE_WORDS["juvenile"]:
+        value = _pick_option("subadult", AGE_WORDS, options)
+    return value
+
+
+# The location note added on upload when a sighting's position was moved by its bearing and distance,
+# e.g. "reprojected from lon=31.906362, lat=-12.989308 (bearing=314° from EXIF, distance=186m)".
+REPROJECTED_RE = re.compile(r"reprojected from lon=[^()|;]*\([^)]*\)", re.IGNORECASE)
+
+
+def remarks_without_stamp(remarks: Optional[str]) -> str:
+    """The encounter's remarks with the er= tag, the upload's location note and their
+    separators taken out (`UNIDENTIFIED; er=twiga:50325:3` -> `UNIDENTIFIED`)."""
+    text = REPROJECTED_RE.sub("", remarks or "")
+    text = STAMP_RE.sub(lambda m: m.group(0)[0] if m.group(0)[0] in "|;" else "", text)
+    text = re.sub(r"([|;])(?:\s*[|;])+", r"\1", text)  # separators left next to each other
+    return re.sub(r"^[\s|;]+|[\s|;]+$", "", text)
+
+
+def appended_notes(current: Optional[str], remarks: Optional[str], options: Optional[dict]):
+    """The row's notes with the Wildbook remarks added after them, unless they are already
+    there. None for a dropdown notes field, or when Wildbook has no remarks besides the tag."""
+    remarks = remarks_without_stamp(remarks)
+    if options is not None or not remarks:
+        return None
+    current = (current or "").strip()
+    if not current:
+        return remarks
+    return current if remarks in current else f"{current}; {remarks}"
+
+
 def row_values(encounter: dict, name: Optional[str], fields: Dict[str, Optional[dict]],
-               id_field: Optional[str], sex_field: Optional[str], age_field: Optional[str]) -> Dict[str, tuple]:
+               id_field: Optional[str], sex_field: Optional[str], age_field: Optional[str],
+               notes_field: Optional[str] = None, current_row: Optional[dict] = None) -> Dict[str, tuple]:
     """{field: (Wildbook value, EarthRanger value or None)} for the configured fields that
     the event type has."""
     values = {}
@@ -67,6 +104,9 @@ def row_values(encounter: dict, name: Optional[str], fields: Dict[str, Optional[
     if sex_field:
         values[sex_field] = (encounter.get("sex"), _pick_option(encounter.get("sex"), SEX_WORDS, fields.get(sex_field)))
     if age_field:
-        values[age_field] = (encounter.get("lifeStage"),
-                             _pick_option(encounter.get("lifeStage"), AGE_WORDS, fields.get(age_field)))
+        values[age_field] = (encounter.get("lifeStage"), age_value(encounter.get("lifeStage"), fields.get(age_field)))
+    if notes_field:
+        remarks = encounter.get("occurrenceRemarks")
+        values[notes_field] = (remarks_without_stamp(remarks),
+                               appended_notes((current_row or {}).get(notes_field), remarks, fields.get(notes_field)))
     return {field: value for field, value in values.items() if field in fields}

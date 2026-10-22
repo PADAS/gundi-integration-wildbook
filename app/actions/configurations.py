@@ -71,6 +71,33 @@ class PullEventUpdatesConfig(PullActionConfiguration):
         ),
         ui_options=UIOptions(placeholder="e.g. animal_age"),
     )
+    notes_field: Optional[str] = FieldWithUIOptions(
+        None,
+        title="Notes Field",
+        description=(
+            "The EarthRanger field ID, inside that list, that takes the animal's remarks from Wildbook "
+            "(without the er= tag), added after the notes already there. Leave empty to not update it."
+        ),
+        ui_options=UIOptions(placeholder="e.g. animal_notes"),
+    )
+    photo_field: Optional[str] = FieldWithUIOptions(
+        None,
+        title="Photo Field",
+        description=(
+            "The EarthRanger field ID, inside that list, of an attachment field that takes one photo "
+            "of the animal from Wildbook. Leave empty to not add photos."
+        ),
+        ui_options=UIOptions(placeholder="e.g. animal_photo"),
+    )
+    photo_viewpoint: Optional[str] = FieldWithUIOptions(
+        None,
+        title="Photo Viewpoint",
+        description=(
+            "Only use Wildbook photos taken from this side, as Wildbook names it. "
+            "Leave empty to use the first photo of any side."
+        ),
+        ui_options=UIOptions(placeholder="e.g. right"),
+    )
     start_from: Optional[date] = FieldWithUIOptions(
         None,
         title="Start From",
@@ -92,10 +119,10 @@ class PullEventUpdatesConfig(PullActionConfiguration):
     )
 
     ui_global_options: GlobalUISchemaOptions = GlobalUISchemaOptions(
-        order=["run_on_schedule", "list_field", "id_field", "sex_field", "age_field", "start_from", "test_copies_of"],
+        order=["run_on_schedule", "list_field", "id_field", "sex_field", "age_field", "notes_field", "photo_field", "photo_viewpoint", "start_from", "test_copies_of"],
     )
 
-    @pydantic.validator("list_field", "id_field", "sex_field", "age_field", pre=True)
+    @pydantic.validator("list_field", "id_field", "sex_field", "age_field", "notes_field", "photo_field", "photo_viewpoint", pre=True)
     def strip_field_names(cls, v):
         return v.strip() or None if isinstance(v, str) else v
 
@@ -103,8 +130,8 @@ class PullEventUpdatesConfig(PullActionConfiguration):
     def check_some_field(cls, values):
         if not values.get("list_field"):
             raise ValueError("Enter the list field.")
-        if not any(values.get(f) for f in ("id_field", "sex_field", "age_field")):
-            raise ValueError("Enter at least one of the ID, sex or age fields.")
+        if not any(values.get(f) for f in ("id_field", "sex_field", "age_field", "notes_field", "photo_field")):
+            raise ValueError("Enter at least one of the ID, sex, age, notes or photo fields.")
         return values
 
 
