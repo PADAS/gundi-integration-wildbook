@@ -16,7 +16,12 @@ title: Setup
 - The key's account must be able to see the sightings you want to bring
   across. A Wildbook admin account sees everything. A regular account only sees
   the records it has access to.
-- The sightings must carry the `er=` label in their remarks. See
+- **An upload tool that labels each sighting.** The organisation's upload tool
+  writes the `er=` label into each animal's remarks when it prepares the
+  Wildbook import, using the organisation's own EarthRanger site name. GCF's
+  ER2WB does this (see [The upload tool](index.md#the-upload-tool)). An
+  organisation without such a tool needs a way to add the label first, and
+  then the connection can start updating its events. See
   [The label on each sighting](good-to-know.md#the-label-on-each-sighting).
 
 !!! tip "Short-lived tokens also work, for testing"

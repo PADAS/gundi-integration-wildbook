@@ -16,12 +16,39 @@ results from one system to the other by hand.
 
 1. A ranger records a sighting in EarthRanger. The event has a list with one
    row per animal seen (for example a herd of giraffes).
-2. The photos are uploaded to Wildbook. Each Wildbook sighting carries a short
-   label in its remarks that points back to the event and the row it came from,
-   such as `er=twiga:50325:3` (site *twiga*, event *#50325*, row *3*).
-3. Researchers match the animals in Wildbook.
-4. A few minutes later, Gundi fills in that row on the EarthRanger event with
+2. After the survey, the team runs an **upload tool** that turns the
+   EarthRanger events and the camera photos into a Wildbook bulk import. For the
+   Giraffe Conservation Foundation (GCF) this tool is **ER2WB**. It adds a short
+   label to each animal's remarks that points back to the event and the row it
+   came from, such as `er=twiga:50325:3` (site *twiga*, event *#50325*,
+   row *3*).
+3. A person uploads the spreadsheet and photos to Wildbook through its bulk
+   import.
+4. Researchers match the animals in Wildbook.
+5. A few minutes later, Gundi fills in that row on the EarthRanger event with
    what Wildbook now knows.
+
+## The upload tool
+
+This connection only brings information **back** from Wildbook. Getting the
+sightings **into** Wildbook, with their labels, is the upload tool's job. GCF's
+ER2WB is a web app GCF built and runs once per survey:
+
+1. It reads the survey's events from EarthRanger, for a site and date range the
+   user picks.
+2. It renames the camera photos so each is unique, and builds a Wildbook
+   bulk-import spreadsheet plus a zip of the photos.
+3. It writes the label `er=<site>:<event number>:<row>` into each animal's
+   remarks.
+4. A person uploads the spreadsheet and photos to Wildbook (for GCF,
+   GiraffeSpotter) through Wildbook's bulk import.
+
+ER2WB only goes from EarthRanger to Wildbook. Together, the two make a round
+trip: ER2WB takes the sightings to Wildbook, and this connection brings the
+results back to EarthRanger.
+
+An organisation needs ER2WB or a tool like it. The labels are how the
+connection knows which event and row each Wildbook sighting belongs to.
 
 ## What's in scope
 
@@ -32,6 +59,10 @@ results from one system to the other by hand.
 | Life stage (adult, subadult, juvenile, calf, unknown) | The **Age** field you choose |
 | The sighting's remarks | Added to the end of the **Notes** field you choose |
 | One photo of the animal | The **Photo** field you choose, if it's empty |
+
+Photos are a welcome addition on EarthRanger: they come from the field team's
+camera through the upload tool, and most events don't have one attached yet
+(on GCF's site, 77 of 2,244 giraffe events in 2026).
 
 - Every field is optional. You pick which ones to fill in, and the rest of the
   event stays as it is.
@@ -47,7 +78,8 @@ results from one system to the other by hand.
 These are handled elsewhere, or by people:
 
 - **Getting sightings into Wildbook.** Uploading photos to Wildbook, and adding
-  the `er=` label to each sighting, happens outside this connection.
+  the `er=` label to each sighting, is done by the organisation's
+  [upload tool](#the-upload-tool), for example GCF's ER2WB.
 - **Creating EarthRanger events.** The connection only updates events that
   already exist.
 - **Matching animals.** That is done in Wildbook. A sighting whose animal isn't
@@ -65,25 +97,32 @@ These are handled elsewhere, or by people:
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Ranger
+    actor Team as Survey team
     participant ER as EarthRanger
+    participant T as Upload tool (ER2WB)
     participant WB as Wildbook
     actor Researcher
     participant G as Gundi
 
-    Ranger->>ER: Reports a sighting (event #50325, one row per animal)
-    Note over ER,WB: Outside this connection
-    ER-->>WB: Photos uploaded, each labelled er=twiga:50325:3
+    Team->>ER: Reports a sighting: event 50325, one row per animal
+    rect rgba(128, 128, 128, 0.12)
+    Note over ER,WB: Outside this connection, once per survey
+    Team->>T: Picks the site and dates, adds the camera photos
+    T->>ER: Reads the survey's events
+    T->>T: Renames the photos, builds the import, labels each animal er=twiga:50325:3
+    T-->>Team: Spreadsheet and zip of photos
+    Team->>WB: Uploads them through the bulk import
+    end
     Researcher->>WB: Identifies the animal
     loop Every 20 minutes
         G->>WB: Which labelled sightings changed since last time?
         WB-->>G: Changed sightings, with name, sex, life stage, remarks
-        G->>ER: Find event #50325 and read its rows
+        G->>ER: Find event 50325 and read its rows
         G->>WB: Get a photo, if a Photo field is set and the row has none
         G->>ER: Write the new values into row 3
         G->>G: Save where it got to, and log a summary
     end
-    Ranger->>ER: Sees the animal's name, sex, age and photo on the event
+    Team->>ER: Sees the animal's name, sex, age and photo on the event
 ```
 
 ## How long it takes

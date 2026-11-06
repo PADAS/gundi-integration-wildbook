@@ -23,6 +23,16 @@ er=<site>:<event number>:<row>
 The label can sit alongside other remarks, separated by `;` or `|`, for example
 `UNIDENTIFIED; er=twiga:50325:3`.
 
+The upload tool writes the label (for GCF, ER2WB has done so since
+2 October 2026).
+
+**The site name must be the EarthRanger site where the event was recorded.** A
+partner that uses GCF's ER2WB but records sightings in its own EarthRanger site
+still gets `twiga` labels, as seen on Kenya sightings with event numbers 391 to
+405. On Twiga those sightings show as "event not found", and the partner's own
+site doesn't receive them. Labelling them with the partner's site name lets the
+connection update the partner's site.
+
 Gundi only looks at sightings labelled for the site it's updating; sightings
 without a label are never touched. A label it can't read is listed as skipped
 in the activity log.
