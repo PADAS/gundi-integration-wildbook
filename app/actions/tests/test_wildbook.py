@@ -1,5 +1,6 @@
 import copy
 
+import httpx
 import pytest
 
 from app.actions import handlers, mapping
@@ -144,6 +145,85 @@ async def test_changed_encounters_split_windows_with_too_many_results(mocker):
     found = await client.get_encounters_changed(0, 25_000, "*er=site-a:*")
     assert sorted(e["id"] for e in found) == versions
     await client._client.aclose()
+
+
+# --- signing in ----------------------------------------------------------------------------
+
+def wildbook_server(valid_tokens):
+    """A fake Wildbook: the service key trades for tokens t1, t2…; searches take valid tokens."""
+    calls = []
+
+    def handle(request):
+        auth = request.headers.get("Authorization")
+        calls.append((request.url.path, auth))
+        if request.url.path == "/api/v3/auth/token":
+            if auth != "Bearer wbsvc_key.secret":
+                return httpx.Response(401, json={"error": "invalid service key"})
+            token = f"t{sum(path.endswith('/auth/token') for path, _ in calls)}"
+            return httpx.Response(200, json={"token": token, "expiresInSeconds": 900})
+        if auth not in {f"Bearer {t}" for t in valid_tokens}:
+            return httpx.Response(401, json={"error": "invalid token"})
+        return httpx.Response(200, json={"hits": [{"id": "e1"}]}, headers={"X-Wildbook-Total-Hits": "1"})
+
+    return calls, httpx.MockTransport(handle)
+
+
+async def client_with(token, transport):
+    client = WildbookClient("https://example.org", token)
+    await client._client.aclose()
+    client._client = httpx.AsyncClient(transport=transport)
+    return client
+
+
+@pytest.mark.asyncio
+async def test_plain_token_is_sent_as_is():
+    calls, transport = wildbook_server(valid_tokens={"plain"})
+    async with await client_with("plain", transport) as client:
+        await client.search("encounter", {"match_all": {}})
+    assert calls == [("/api/v3/search/encounter", "Bearer plain")]
+
+
+@pytest.mark.asyncio
+async def test_service_key_is_traded_once_and_only_sent_to_the_token_endpoint():
+    calls, transport = wildbook_server(valid_tokens={"t1"})
+    async with await client_with("wbsvc_key.secret", transport) as client:
+        await client.search("encounter", {"match_all": {}})
+        await client.search("encounter", {"match_all": {}})
+    assert calls == [
+        ("/api/v3/auth/token", "Bearer wbsvc_key.secret"),
+        ("/api/v3/search/encounter", "Bearer t1"),
+        ("/api/v3/search/encounter", "Bearer t1"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_service_key_is_traded_again_when_the_token_is_refused():
+    calls, transport = wildbook_server(valid_tokens={"t2"})
+    async with await client_with("wbsvc_key.secret", transport) as client:
+        hits, _ = await client.search("encounter", {"match_all": {}})
+    assert hits == [{"id": "e1"}]
+    assert [path for path, _ in calls] == [
+        "/api/v3/auth/token", "/api/v3/search/encounter", "/api/v3/auth/token", "/api/v3/search/encounter"]
+
+
+@pytest.mark.asyncio
+async def test_service_key_is_traded_again_close_to_expiry(mocker):
+    calls, transport = wildbook_server(valid_tokens={"t1", "t2"})
+    clock = mocker.patch("app.services.wildbook.time.monotonic", return_value=1000.0)
+    async with await client_with("wbsvc_key.secret", transport) as client:
+        await client.search("encounter", {"match_all": {}})
+        clock.return_value = 1000.0 + 900 - 30  # inside the last minute of the token
+        await client.search("encounter", {"match_all": {}})
+    assert calls[-1] == ("/api/v3/search/encounter", "Bearer t2")
+
+
+@pytest.mark.asyncio
+async def test_wrong_service_key_reads_as_refused_credentials():
+    _, transport = wildbook_server(valid_tokens=set())
+    async with await client_with("wbsvc_wrong", transport) as client:
+        with pytest.raises(httpx.HTTPStatusError) as error:
+            await client.check_token()
+    assert error.value.response.status_code == 401
 
 
 # --- updating one event --------------------------------------------------------------------
