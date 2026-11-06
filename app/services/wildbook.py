@@ -1,11 +1,17 @@
 """Wildbook API v3 client (token auth).
 
+The connection setting holds either a short-lived token or an organization
+service key (`wbsvc_…`). A service key is only ever sent to `/auth/token`,
+which trades it for a short-lived token; that token is reused until it is
+close to expiring or a call returns 401, then traded again.
+
 Search endpoints take OpenSearch queries and page with `from`/`size`, where
 `from + size` can't go past 10,000; the total comes back in the
 `X-Wildbook-Total-Hits` header. Callers that may hit more than that split the
 query into smaller windows (see `search_all`).
 """
 import logging
+import time
 from typing import Dict, List, Tuple, Optional
 
 import httpx
@@ -17,6 +23,8 @@ logger = logging.getLogger(__name__)
 MAX_RESULT_WINDOW = 10_000
 PAGE_SIZE = 500
 RESOLVE_BATCH = 100
+SERVICE_KEY_PREFIX = "wbsvc_"
+TOKEN_REFRESH_MARGIN_SECONDS = 60
 
 
 class WildbookClient:
@@ -25,10 +33,11 @@ class WildbookClient:
         if not base_url:
             raise ConfigurationNotFound("Enter the Wildbook address in the connection settings.")
         self.api_root = f"{base_url.rstrip('/')}/api/v3"
-        self._client = httpx.AsyncClient(
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=timeout,
-        )
+        token = (token or "").strip()
+        self._service_key = token if token.startswith(SERVICE_KEY_PREFIX) else None
+        self._token = None if self._service_key else token
+        self._token_expires_at = float("inf")
+        self._client = httpx.AsyncClient(timeout=timeout)
 
     async def __aenter__(self):
         return self
@@ -36,14 +45,38 @@ class WildbookClient:
     async def __aexit__(self, *exc):
         await self._client.aclose()
 
+    async def _trade_service_key(self) -> None:
+        """Get a short-lived read token for the service key."""
+        response = await self._client.post(
+            f"{self.api_root}/auth/token",
+            headers={"Authorization": f"Bearer {self._service_key}"},
+        )
+        response.raise_for_status()
+        data = response.json()
+        self._token = data["token"]
+        self._token_expires_at = time.monotonic() + int(data.get("expiresInSeconds", 0))
+
+    async def _post(self, path: str, **kwargs) -> httpx.Response:
+        if self._service_key and (
+                self._token is None
+                or time.monotonic() > self._token_expires_at - TOKEN_REFRESH_MARGIN_SECONDS):
+            await self._trade_service_key()
+        response = await self._client.post(
+            f"{self.api_root}{path}", headers={"Authorization": f"Bearer {self._token}"}, **kwargs)
+        if response.status_code == 401 and self._service_key:
+            await self._trade_service_key()
+            response = await self._client.post(
+                f"{self.api_root}{path}", headers={"Authorization": f"Bearer {self._token}"}, **kwargs)
+        response.raise_for_status()
+        return response
+
     async def search(self, index: str, query: dict, start: int = 0, size: int = PAGE_SIZE) -> Tuple[List[dict], int]:
         """One page of an index search: (hits, total)."""
-        response = await self._client.post(
-            f"{self.api_root}/search/{index}",
+        response = await self._post(
+            f"/search/{index}",
             params={"from": start, "size": size},
             json={"query": query},
         )
-        response.raise_for_status()
         hits = response.json().get("hits") or []
         total = int(response.headers.get("X-Wildbook-Total-Hits", len(hits)))
         return hits, total
@@ -93,11 +126,10 @@ class WildbookClient:
             annotations = await self.search_all("annotation", {"terms": {"encounterId": ids[i:i + RESOLVE_BATCH]}})
             annotation_ids = [a["id"] for a in annotations]
             for j in range(0, len(annotation_ids), RESOLVE_BATCH):
-                response = await self._client.post(
-                    f"{self.api_root}/media/resolve",
+                response = await self._post(
+                    "/media/resolve",
                     json={"annotationIds": annotation_ids[j:j + RESOLVE_BATCH]},
                 )
-                response.raise_for_status()
                 for media in response.json() or []:
                     encounter_id = media.get("encounterId")
                     if (media.get("imageUrl") and encounter_id not in photos
