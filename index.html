@@ -315,6 +315,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#the-upload-tool" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The upload tool
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#whats-in-scope" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -462,13 +473,37 @@ results from one system to the other by hand.</p>
 <ol>
 <li>A ranger records a sighting in EarthRanger. The event has a list with one
    row per animal seen (for example a herd of giraffes).</li>
-<li>The photos are uploaded to Wildbook. Each Wildbook sighting carries a short
-   label in its remarks that points back to the event and the row it came from,
-   such as <code>er=twiga:50325:3</code> (site <em>twiga</em>, event <em>#50325</em>, row <em>3</em>).</li>
+<li>After the survey, the team runs an <strong>upload tool</strong> that turns the
+   EarthRanger events and the camera photos into a Wildbook bulk import. For the
+   Giraffe Conservation Foundation (GCF) this tool is <strong>ER2WB</strong>. It adds a short
+   label to each animal's remarks that points back to the event and the row it
+   came from, such as <code>er=twiga:50325:3</code> (site <em>twiga</em>, event <em>#50325</em>,
+   row <em>3</em>).</li>
+<li>A person uploads the spreadsheet and photos to Wildbook through its bulk
+   import.</li>
 <li>Researchers match the animals in Wildbook.</li>
 <li>A few minutes later, Gundi fills in that row on the EarthRanger event with
    what Wildbook now knows.</li>
 </ol>
+<h2 id="the-upload-tool">The upload tool<a class="headerlink" href="#the-upload-tool" title="Permanent link">&para;</a></h2>
+<p>This connection only brings information <strong>back</strong> from Wildbook. Getting the
+sightings <strong>into</strong> Wildbook, with their labels, is the upload tool's job. GCF's
+ER2WB is a web app GCF built and runs once per survey:</p>
+<ol>
+<li>It reads the survey's events from EarthRanger, for a site and date range the
+   user picks.</li>
+<li>It renames the camera photos so each is unique, and builds a Wildbook
+   bulk-import spreadsheet plus a zip of the photos.</li>
+<li>It writes the label <code>er=&lt;site&gt;:&lt;event number&gt;:&lt;row&gt;</code> into each animal's
+   remarks.</li>
+<li>A person uploads the spreadsheet and photos to Wildbook (for GCF,
+   GiraffeSpotter) through Wildbook's bulk import.</li>
+</ol>
+<p>ER2WB only goes from EarthRanger to Wildbook. Together, the two make a round
+trip: ER2WB takes the sightings to Wildbook, and this connection brings the
+results back to EarthRanger.</p>
+<p>An organisation needs ER2WB or a tool like it. The labels are how the
+connection knows which event and row each Wildbook sighting belongs to.</p>
 <h2 id="whats-in-scope">What's in scope<a class="headerlink" href="#whats-in-scope" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -500,6 +535,9 @@ results from one system to the other by hand.</p>
 </tr>
 </tbody>
 </table>
+<p>Photos are a welcome addition on EarthRanger: they come from the field team's
+camera through the upload tool, and most events don't have one attached yet
+(on GCF's site, 77 of 2,244 giraffe events in 2026).</p>
 <ul>
 <li>Every field is optional. You pick which ones to fill in, and the rest of the
   event stays as it is.</li>
@@ -514,7 +552,8 @@ results from one system to the other by hand.</p>
 <p>These are handled elsewhere, or by people:</p>
 <ul>
 <li><strong>Getting sightings into Wildbook.</strong> Uploading photos to Wildbook, and adding
-  the <code>er=</code> label to each sighting, happens outside this connection.</li>
+  the <code>er=</code> label to each sighting, is done by the organisation's
+  <a href="#the-upload-tool">upload tool</a>, for example GCF's ER2WB.</li>
 <li><strong>Creating EarthRanger events.</strong> The connection only updates events that
   already exist.</li>
 <li><strong>Matching animals.</strong> That is done in Wildbook. A sighting whose animal isn't
@@ -530,25 +569,32 @@ results from one system to the other by hand.</p>
 <h2 id="how-it-works">How it works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>sequenceDiagram
     autonumber
-    actor Ranger
+    actor Team as Survey team
     participant ER as EarthRanger
+    participant T as Upload tool (ER2WB)
     participant WB as Wildbook
     actor Researcher
     participant G as Gundi
 
-    Ranger-&gt;&gt;ER: Reports a sighting (event #50325, one row per animal)
-    Note over ER,WB: Outside this connection
-    ER--&gt;&gt;WB: Photos uploaded, each labelled er=twiga:50325:3
+    Team-&gt;&gt;ER: Reports a sighting: event 50325, one row per animal
+    rect rgba(128, 128, 128, 0.12)
+    Note over ER,WB: Outside this connection, once per survey
+    Team-&gt;&gt;T: Picks the site and dates, adds the camera photos
+    T-&gt;&gt;ER: Reads the survey's events
+    T-&gt;&gt;T: Renames the photos, builds the import, labels each animal er=twiga:50325:3
+    T--&gt;&gt;Team: Spreadsheet and zip of photos
+    Team-&gt;&gt;WB: Uploads them through the bulk import
+    end
     Researcher-&gt;&gt;WB: Identifies the animal
     loop Every 20 minutes
         G-&gt;&gt;WB: Which labelled sightings changed since last time?
         WB--&gt;&gt;G: Changed sightings, with name, sex, life stage, remarks
-        G-&gt;&gt;ER: Find event #50325 and read its rows
+        G-&gt;&gt;ER: Find event 50325 and read its rows
         G-&gt;&gt;WB: Get a photo, if a Photo field is set and the row has none
         G-&gt;&gt;ER: Write the new values into row 3
         G-&gt;&gt;G: Save where it got to, and log a summary
     end
-    Ranger-&gt;&gt;ER: Sees the animal's name, sex, age and photo on the event</code></pre>
+    Team-&gt;&gt;ER: Sees the animal's name, sex, age and photo on the event</code></pre>
 <h2 id="how-long-it-takes">How long it takes<a class="headerlink" href="#how-long-it-takes" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Gundi checks Wildbook <strong>every 20 minutes</strong>.</li>
