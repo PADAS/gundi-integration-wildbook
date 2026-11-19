@@ -1,0 +1,32 @@
+site_name: Wildbook to EarthRanger
+site_description: How the Gundi Wildbook connection fills in animal details on EarthRanger events, and how to set it up.
+repo_url: https://github.com/PADAS/gundi-integration-wildbook
+repo_name: PADAS/gundi-integration-wildbook
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: green
+      accent: green
+  features:
+    - navigation.top
+    - toc.integrate
+
+nav:
+  - Overview: index.md
+  - Setup: setup.md
+  - Good to know: good-to-know.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - attr_list
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - toc:
+      permalink: true
