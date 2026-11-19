@@ -23,6 +23,10 @@ title: Setup
   organisation without such a tool needs a way to add the label first, and
   then the connection can start updating its events. See
   [The label on each sighting](good-to-know.md#the-label-on-each-sighting).
+- **Events that are finished.** Run the upload tool once the survey's events
+  are final in EarthRanger. Adding, deleting or reordering animals in a list
+  afterwards changes the row numbers, so the labels would point to the wrong
+  animal.
 
 !!! tip "Short-lived tokens also work, for testing"
     A token from **API Access → Read data** works too, but it expires after a

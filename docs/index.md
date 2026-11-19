@@ -50,6 +50,10 @@ results back to EarthRanger.
 An organisation needs ER2WB or a tool like it. The labels are how the
 connection knows which event and row each Wildbook sighting belongs to.
 
+!!! tip "Finish editing events before running the upload tool"
+    Adding, deleting or reordering animals in an event's list afterwards
+    changes the row numbers, so the labels would point to the wrong animal.
+
 ## What's in scope
 
 | From Wildbook | Goes into the animal's row in EarthRanger |
